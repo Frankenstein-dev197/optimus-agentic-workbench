@@ -444,3 +444,288 @@ body {
   height: 100%;
   overflow: hidden;
 }
+
+/* ==========================================================================
+   OPTIMUS CHAT INTERFACE
+   ========================================================================== */
+
+.optimus-chat-interface {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--optimus-bg-secondary);
+}
+
+.optimus-chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.optimus-message {
+  display: flex;
+  gap: 12px;
+  max-width: 85%;
+  animation: messageIn 0.2s ease-out;
+}
+
+@keyframes messageIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.optimus-message-user {
+  align-self: flex-end;
+  flex-direction: row-reverse;
+}
+
+.optimus-message-assistant {
+  align-self: flex-start;
+}
+
+.optimus-message-tool {
+  align-self: flex-start;
+  max-width: 90%;
+}
+
+.optimus-message-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--optimus-bg-hover);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.optimus-message-user .optimus-message-avatar {
+  background: var(--optimus-accent);
+}
+
+.optimus-message-content {
+  padding: 12px 16px;
+  border-radius: 16px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.optimus-message-user .optimus-message-content {
+  background: var(--optimus-accent);
+  color: white;
+  border-bottom-right-radius: 4px;
+}
+
+.optimus-message-assistant .optimus-message-content {
+  background: var(--optimus-bg-tertiary);
+  border-bottom-left-radius: 4px;
+}
+
+.optimus-message-tool .optimus-message-content {
+  background: var(--optimus-bg-primary);
+  border: 1px solid var(--optimus-border);
+  border-radius: 8px;
+}
+
+.optimus-message-text {
+  white-space: pre-wrap;
+}
+
+.optimus-message-time {
+  font-size: 11px;
+  opacity: 0.6;
+  margin-top: 4px;
+}
+
+.optimus-text-content {
+  white-space: pre-wrap;
+}
+
+.optimus-text-content h2,
+.optimus-text-content h3,
+.optimus-text-content h4 {
+  margin: 12px 0 8px;
+  color: #fff;
+}
+
+.optimus-text-content h2 { font-size: 18px; }
+.optimus-text-content h3 { font-size: 16px; }
+.optimus-text-content h4 { font-size: 14px; }
+
+.optimus-text-content li {
+  margin-left: 20px;
+  margin-bottom: 4px;
+}
+
+.optimus-text-content code {
+  background: rgba(0, 0, 0, 0.3);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'Fira Code', monospace;
+  font-size: 13px;
+}
+
+.optimus-code-block {
+  background: #1a1a1a;
+  padding: 12px;
+  border-radius: 8px;
+  margin: 8px 0;
+  overflow-x: auto;
+  font-family: 'Fira Code', monospace;
+  font-size: 13px;
+}
+
+.optimus-code-block code {
+  background: transparent;
+  padding: 0;
+}
+
+/* ==========================================================================
+   OPTIMUS CHAT INPUT
+   ========================================================================== */
+
+.optimus-chat-input-container {
+  display: flex;
+  gap: 12px;
+  padding: 16px;
+  background: var(--optimus-bg-tertiary);
+  border-top: 1px solid var(--optimus-border);
+}
+
+.optimus-chat-input {
+  flex: 1;
+  padding: 12px 16px;
+  border: 1px solid var(--optimus-border);
+  border-radius: 24px;
+  background: var(--optimus-bg-primary);
+  color: var(--optimus-text-primary);
+  font-size: 14px;
+  font-family: inherit;
+  resize: none;
+  min-height: 44px;
+  max-height: 120px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.optimus-chat-input:focus {
+  border-color: var(--optimus-accent);
+}
+
+.optimus-chat-input::placeholder {
+  color: var(--optimus-text-secondary);
+}
+
+.optimus-chat-send {
+  width: 44px;
+  height: 44px;
+  border: none;
+  border-radius: 50%;
+  background: var(--optimus-accent);
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s, transform 0.2s;
+  flex-shrink: 0;
+}
+
+.optimus-chat-send:hover:not(:disabled) {
+  background: #1177bb;
+  transform: scale(1.05);
+}
+
+.optimus-chat-send:disabled {
+  background: var(--optimus-bg-hover);
+  cursor: not-allowed;
+}
+
+/* ==========================================================================
+   OPTIMUS TOOL CARDS
+   ========================================================================== */
+
+.optimus-tool-card {
+  background: var(--optimus-bg-primary);
+  border: 1px solid var(--optimus-border);
+  border-radius: 8px;
+  padding: 12px;
+  margin-left: 48px;
+  max-width: 80%;
+}
+
+.optimus-tool-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.optimus-tool-icon {
+  font-size: 14px;
+}
+
+.optimus-tool-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--optimus-text-primary);
+}
+
+.optimus-tool-status {
+  margin-left: auto;
+  font-size: 14px;
+}
+
+.optimus-tool-status.success {
+  color: #4caf50;
+}
+
+.optimus-tool-status.error {
+  color: #f44336;
+}
+
+.optimus-tool-error {
+  margin-top: 8px;
+  font-size: 13px;
+  color: #f44336;
+}
+
+/* ==========================================================================
+   OPTIMUS LOADING
+   ========================================================================== */
+
+.optimus-loading-dots {
+  display: flex;
+  gap: 4px;
+  padding: 4px 0;
+}
+
+.optimus-loading-dots span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--optimus-text-secondary);
+  animation: optimusLoading 1.4s infinite ease-in-out both;
+}
+
+.optimus-loading-dots.small span {
+  width: 6px;
+  height: 6px;
+}
+
+.optimus-loading-dots span:nth-child(1) { animation-delay: -0.32s; }
+.optimus-loading-dots span:nth-child(2) { animation-delay: -0.16s; }
+
+@keyframes optimusLoading {
+  0%, 80%, 100% { transform: scale(0.6); opacity: 0.5; }
+  40% { transform: scale(1); opacity: 1; }
+}

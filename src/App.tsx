@@ -1,14 +1,17 @@
 import { OptimusLayout } from './components/optimus/layout/optimus-layout';
-import { OptimusChat } from './components/optimus/chat/chat-panel';
+import { OptimusChatInterface } from './components/optimus/chat/chat-interface';
 import { useOptimusLayoutStore } from './stores/optimus/layout-store';
+import { useWorkbenchEvents } from './hooks/optimus/use-workbench-events';
 
 function App() {
   const viewMode = useOptimusLayoutStore((state) => state.viewMode);
   const chatPanelHeight = useOptimusLayoutStore((state) => state.chatPanelHeight);
   const optimusEnabled = useOptimusLayoutStore((state) => state.optimusEnabled);
-  const panels = useOptimusLayoutStore((state) => state.panels);
   
-  // Default to OPTIMUS mode
+  // Initialize workbench events
+  useWorkbenchEvents();
+  
+  // Default to welcome screen
   if (!optimusEnabled) {
     return (
       <OptimusLayout>
@@ -24,13 +27,13 @@ function App() {
         className="optimus-chat-container"
         style={{ width: viewMode === "focus" ? "0px" : `${Math.min(chatPanelHeight, 60)}%` }}
       >
-        {viewMode !== "focus" && <OptimusChat />}
+        {viewMode !== "focus" && <OptimusChatInterface />}
       </div>
       
       {/* Right: Workbench */}
       <div className="optimus-workbench-container">
         <OptimusLayout>
-          <WorkbenchContent panels={panels} />
+          <WorkbenchContent />
         </OptimusLayout>
       </div>
     </div>
@@ -38,7 +41,9 @@ function App() {
 }
 
 // Workbench Content Component
-function WorkbenchContent({ panels }: { panels: Record<string, any> }) {
+function WorkbenchContent() {
+  const panels = useOptimusLayoutStore((state) => state.panels);
+  
   return (
     <div className="optimus-welcome">
       <h1>OPTIMUS Workbench</h1>

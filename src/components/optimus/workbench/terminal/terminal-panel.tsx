@@ -1,43 +1,43 @@
 /**
  * OPTIMUS Terminal Panel
  * 
- * Integrated terminal with multi-session support.
+ * Integrated terminal with xterm.js and real command execution.
  */
 
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useCallback } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { useOptimusLayoutStore } from "../../../../stores/optimus/layout-store";
-import { useTerminalOutput } from "../../../../hooks/optimus/use-workbench-events";
+import { terminalService } from "../../../../services/optimus/terminal";
+import { emitCommandStarted, emitCommandFinished } from "../../../../services/optimus/event-bridge";
 import "@xterm/xterm/css/xterm.css";
 
 export function OptimusTerminal() {
-  const terminalRef = useRef<HTMLDivElement>(null);
-  const xtermRef = useRef<Terminal | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const terminalRef = useRef<Terminal | null>(null);
+  const fitAddonRef = useRef<FitAddon | null>(null);
+  const inputBufferRef = useRef<string>("");
   
   const {
     terminalSessions,
     activeTerminalSessionId,
     setActiveTerminalSession,
     addTerminalSession,
-    appendTerminalOutput,
   } = useOptimusLayoutStore();
-  
-  const { lastEvent } = useTerminalOutput();
   
   // Initialize terminal
   useEffect(() => {
-    if (!terminalRef.current || xtermRef.current) return;
+    if (!containerRef.current || terminalRef.current) return;
     
     const terminal = new Terminal({
       cursorBlink: true,
       fontSize: 13,
       fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
       theme: {
-        background: "#0d1117",
+        background: "#1e1e1e",
         foreground: "#c9d1d9",
         cursor: "#58a6ff",
-        cursorAccent: "#0d1117",
+        cursorAccent: "#1e1e1e",
         selectionBackground: "#388bfd66",
         black: "#484f58",
         red: "#f85149",
@@ -60,56 +60,137 @@ export function OptimusTerminal() {
     
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
-    terminal.open(terminalRef.current);
+    terminal.open(containerRef.current);
     fitAddon.fit();
     
-    xtermRef.current = terminal;
+    terminalRef.current = terminal;
+    fitAddonRef.current = fitAddon;
     
     // Welcome message
-    terminal.writeln("\x1b[36mOPTIMUS Terminal\x1b[0m");
-    terminal.writeln("Type commands to execute them in the sandbox environment.");
+    terminal.writeln("\x1b[36m⚡ OPTIMUS Terminal\x1b[0m");
+    terminal.writeln("Type commands to execute them. Press Enter to run.");
     terminal.writeln("");
     
-    return () => {
-      terminal.dispose();
-      xtermRef.current = null;
+    // Create initial session
+    const session = terminalService.createSession();
+    addTerminalSession({
+      id: session.id,
+      cwd: session.cwd,
+      startedAt: session.startedAt,
+    });
+    
+    // Handle resize
+    const handleResize = () => {
+      if (fitAddon) fitAddon.fit();
     };
-  }, []);
+    window.addEventListener("resize", handleResize);
+    
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      terminal.dispose();
+      terminalRef.current = null;
+      fitAddonRef.current = null;
+    };
+  }, [addTerminalSession]);
   
   // Handle terminal input
   useEffect(() => {
-    if (!xtermRef.current) return;
+    if (!terminalRef.current) return;
     
-    const terminal = xtermRef.current;
+    const terminal = terminalRef.current;
+    inputBufferRef.current = "";
     
-    terminal.onData((data) => {
-      // Send data to shell
-      terminal.writeln("");
-      // TODO: Connect to actual bash service
-      terminal.writeln(`\x1b[33m$ ${data}\x1b[0m`);
-      terminal.writeln("\x1b[32mCommand would be sent to sandbox here\x1b[0m");
+    terminal.onData((data: string) => {
+      const code = data.charCodeAt(0);
+      
+      // Enter
+      if (code === 13) {
+        const command = inputBufferRef.current.trim();
+        inputBufferRef.current = "";
+        
+        terminal.writeln("");
+        
+        if (command) {
+          executeCommand(terminal, command);
+        }
+      }
+      // Backspace
+      else if (code === 127) {
+        if (inputBufferRef.current.length > 0) {
+          inputBufferRef.current = inputBufferRef.current.slice(0, -1);
+          terminal.write("\b \b");
+        }
+      }
+      // Ctrl+C
+      else if (code === 3) {
+        terminal.writeln("^C");
+        inputBufferRef.current = "";
+      }
+      // Regular printable characters
+      else if (code >= 32) {
+        inputBufferRef.current += data;
+        terminal.write(data);
+      }
     });
-  }, []);
+  }, [activeTerminalSessionId]);
   
-  // Display terminal output from events
-  useEffect(() => {
-    if (!xtermRef.current || !lastEvent) return;
+  // Execute command
+  const executeCommand = useCallback(async (terminal: Terminal, command: string) => {
+    if (!activeTerminalSessionId) return;
     
-    const terminal = xtermRef.current;
+    // Show command being executed
+    terminal.writeln(`\x1b[33mExecuting: ${command}\x1b[0m`);
     
-    if ("command" in lastEvent && lastEvent.command) {
-      terminal.writeln(`\x1b[33m$ ${lastEvent.command}\x1b[0m`);
+    // Emit events
+    emitCommandStarted(activeTerminalSessionId, command);
+    
+    try {
+      const result = await terminalService.executeCommand(activeTerminalSessionId, command);
+      
+      // Write output
+      if (result.stdout) {
+        terminal.writeln(result.stdout);
+      }
+      if (result.stderr) {
+        terminal.writeln(`\x1b[31m${result.stderr}\x1b[0m`);
+      }
+      
+      if (result.exitCode === 0) {
+        terminal.writeln(`\x1b[32m✓ Done in ${result.duration}ms\x1b[0m`);
+      } else {
+        terminal.writeln(`\x1b[31m✗ Exit code: ${result.exitCode}\x1b[0m`);
+      }
+      
+      emitCommandFinished(activeTerminalSessionId, command, result.exitCode, result.duration);
+    } catch (error) {
+      terminal.writeln(`\x1b[31mError: ${error}\x1b[0m`);
     }
-  }, [lastEvent]);
+    
+    terminal.writeln("");
+  }, [activeTerminalSessionId]);
   
   // Create new terminal session
   const handleNewTerminal = () => {
-    const sessionId = `terminal-${Date.now()}`;
+    const session = terminalService.createSession();
     addTerminalSession({
-      id: sessionId,
-      cwd: "/workspace",
-      startedAt: Date.now(),
+      id: session.id,
+      cwd: session.cwd,
+      startedAt: session.startedAt,
     });
+    
+    if (terminalRef.current) {
+      terminalRef.current.writeln("\r\n\x1b[33m--- New Session ---\x1b[0m\r\n");
+    }
+  };
+  
+  // Clear terminal
+  const handleClear = () => {
+    if (terminalRef.current) {
+      terminalRef.current.clear();
+      terminalRef.current.writeln("\x1b[36m⚡ OPTIMUS Terminal\x1b[0m");
+      terminalRef.current.writeln("Type commands to execute them. Press Enter to run.");
+      terminalRef.current.writeln("");
+    }
   };
   
   return (
@@ -131,7 +212,7 @@ export function OptimusTerminal() {
           </button>
         </div>
         <div className="optimus-terminal-actions">
-          <button title="Clear Terminal">
+          <button onClick={handleClear} title="Clear Terminal">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
             </svg>
@@ -140,7 +221,7 @@ export function OptimusTerminal() {
       </div>
       
       {/* Terminal Content */}
-      <div className="optimus-terminal-content" ref={terminalRef} />
+      <div className="optimus-terminal-content" ref={containerRef} />
     </div>
   );
 }

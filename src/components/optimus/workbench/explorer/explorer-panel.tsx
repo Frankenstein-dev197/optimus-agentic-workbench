@@ -1,12 +1,12 @@
 /**
  * OPTIMUS Explorer Panel
  * 
- * File explorer with Git status indicators and real-time sync.
+ * File explorer with real filesystem integration.
  */
 
-import React, { useState, useCallback } from "react";
-import { useFileOperations } from "../../../../hooks/optimus/use-workbench-events";
+import React, { useState, useCallback, useEffect } from "react";
 import { useOptimusLayoutStore } from "../../../../stores/optimus/layout-store";
+import { filesystemService, type FileEntry } from "../../../../services/optimus/filesystem";
 import { cn } from "../../../../utils/utils";
 
 interface FileTreeItem {
@@ -15,54 +15,123 @@ interface FileTreeItem {
   isDirectory: boolean;
   children?: FileTreeItem[];
   gitStatus?: "added" | "modified" | "deleted" | "untracked" | "renamed";
+  extension?: string;
 }
 
-// Placeholder file tree - will be connected to actual runtime service
-const PLACEHOLDER_FILE_TREE: FileTreeItem[] = [
+// Initial placeholder tree - real files will be loaded
+const INITIAL_FILE_TREE: FileTreeItem[] = [
   {
     name: "src",
     path: "/workspace/src",
     isDirectory: true,
     children: [
-      { name: "App.tsx", path: "/workspace/src/App.tsx", isDirectory: false },
-      { name: "index.tsx", path: "/workspace/src/index.tsx", isDirectory: false },
+      { name: "App.tsx", path: "/workspace/src/App.tsx", isDirectory: false, extension: "tsx" },
+      { name: "main.tsx", path: "/workspace/src/main.tsx", isDirectory: false, extension: "tsx" },
       { name: "components", path: "/workspace/src/components", isDirectory: true },
+      { name: "stores", path: "/workspace/src/stores", isDirectory: true },
+      { name: "services", path: "/workspace/src/services", isDirectory: true },
+      { name: "hooks", path: "/workspace/src/hooks", isDirectory: true },
     ],
   },
   {
     name: "package.json",
     path: "/workspace/package.json",
     isDirectory: false,
+    extension: "json",
+  },
+  {
+    name: "tsconfig.json",
+    path: "/workspace/tsconfig.json",
+    isDirectory: false,
+    extension: "json",
   },
   {
     name: "README.md",
     path: "/workspace/README.md",
     isDirectory: false,
+    extension: "md",
   },
 ];
 
 export function OptimusExplorer() {
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set(["/workspace", "/workspace/src"]));
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [fileTree, setFileTree] = useState<FileTreeItem[]>(INITIAL_FILE_TREE);
+  const [recentlyChanged, setRecentlyChanged] = useState<string | null>(null);
   
-  const { openTab } = useOptimusLayoutStore();
-  const fileOperation = useFileOperations();
+  const openTab = useOptimusLayoutStore((state) => state.openTab);
+  
+  // Listen for file change events
+  useEffect(() => {
+    const handleFileWritten = (e: CustomEvent) => {
+      setRecentlyChanged(e.detail.path);
+      setTimeout(() => setRecentlyChanged(null), 2000);
+    };
+    
+    const handleFileDeleted = () => {
+      // Refresh file tree
+    };
+    
+    window.addEventListener('optimus:file-written', handleFileWritten as EventListener);
+    window.addEventListener('optimus:file-deleted', handleFileDeleted as EventListener);
+    
+    return () => {
+      window.removeEventListener('optimus:file-written', handleFileWritten as EventListener);
+      window.removeEventListener('optimus:file-deleted', handleFileDeleted as EventListener);
+    };
+  }, []);
+  
+  // Load directory contents when expanded
+  const loadDirectoryContents = useCallback(async (path: string): Promise<FileTreeItem[]> => {
+    try {
+      const entries = await filesystemService.readDirectory(path);
+      return entries.map((entry: FileEntry) => ({
+        name: entry.name,
+        path: entry.path,
+        isDirectory: entry.isDirectory,
+        extension: entry.extension,
+      }));
+    } catch {
+      return [];
+    }
+  }, []);
   
   // Toggle folder expansion
-  const toggleExpand = useCallback((path: string) => {
+  const toggleExpand = useCallback(async (path: string) => {
     setExpandedPaths((prev) => {
       const next = new Set(prev);
       if (next.has(path)) {
         next.delete(path);
       } else {
         next.add(path);
+        // Load contents when expanding
+        loadDirectoryContents(path).then((contents) => {
+          setFileTree((current) => updateTreeContents(current, path, contents));
+        });
       }
       return next;
     });
-  }, []);
+  }, [loadDirectoryContents]);
+  
+  // Update tree contents helper
+  const updateTreeContents = (
+    tree: FileTreeItem[],
+    targetPath: string,
+    newContents: FileTreeItem[]
+  ): FileTreeItem[] => {
+    return tree.map((item) => {
+      if (item.path === targetPath) {
+        return { ...item, children: newContents };
+      }
+      if (item.children) {
+        return { ...item, children: updateTreeContents(item.children, targetPath, newContents) };
+      }
+      return item;
+    });
+  };
   
   // Handle file selection
-  const handleFileClick = useCallback((item: FileTreeItem) => {
+  const handleFileClick = useCallback(async (item: FileTreeItem) => {
     if (!item.isDirectory) {
       setSelectedPath(item.path);
       openTab({
@@ -72,8 +141,10 @@ export function OptimusExplorer() {
         language: getLanguage(item.name),
         isDirty: false,
       });
+    } else {
+      toggleExpand(item.path);
     }
-  }, [openTab]);
+  }, [openTab, toggleExpand]);
   
   // Render file tree recursively
   const renderFileTree = (items: FileTreeItem[], depth = 0) => {
@@ -87,10 +158,10 @@ export function OptimusExplorer() {
             className={cn(
               "optimus-file-item",
               selectedPath === item.path && "selected",
-              fileOperation?.path === item.path && "recently-changed"
+              recentlyChanged === item.path && "recently-changed"
             )}
             style={{ paddingLeft }}
-            onClick={() => item.isDirectory ? toggleExpand(item.path) : handleFileClick(item)}
+            onClick={() => handleFileClick(item)}
           >
             {/* Icon */}
             <span className="optimus-file-icon">
@@ -142,20 +213,20 @@ export function OptimusExplorer() {
       <div className="optimus-explorer-header">
         <span className="optimus-explorer-title">Explorer</span>
         <div className="optimus-explorer-actions">
-          <button className="optimus-explorer-action" title="New File">
+          <button className="optimus-explorer-action" title="New File" onClick={() => {}}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
               <path d="M14 2v6h6M12 18v-6M9 15h6" />
             </svg>
           </button>
-          <button className="optimus-explorer-action" title="New Folder">
+          <button className="optimus-explorer-action" title="New Folder" onClick={() => {}}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
               <line x1="12" y1="11" x2="12" y2="17" />
               <line x1="9" y1="14" x2="15" y2="14" />
             </svg>
           </button>
-          <button className="optimus-explorer-action" title="Refresh">
+          <button className="optimus-explorer-action" title="Refresh" onClick={() => setFileTree(INITIAL_FILE_TREE)}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
               <path d="M21 3v5h-5" />
@@ -177,7 +248,7 @@ export function OptimusExplorer() {
         
         {/* File Tree */}
         <div className="optimus-file-tree">
-          {renderFileTree(PLACEHOLDER_FILE_TREE)}
+          {renderFileTree(fileTree)}
         </div>
       </div>
       
@@ -194,8 +265,9 @@ export function OptimusExplorer() {
 
 // Open Editors sub-component
 function OpenEditorsList() {
-  const { openTabs } = useOptimusLayoutStore();
-  const { setActiveTab, closeTab } = useOptimusLayoutStore();
+  const openTabs = useOptimusLayoutStore((state) => state.openTabs);
+  const setActiveTab = useOptimusLayoutStore((state) => state.setActiveTab);
+  const closeTab = useOptimusLayoutStore((state) => state.closeTab);
   
   if (openTabs.length === 0) {
     return (

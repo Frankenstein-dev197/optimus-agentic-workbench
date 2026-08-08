@@ -1,87 +1,87 @@
 /**
  * OPTIMUS Workbench Events Hook
  * 
- * Connects the Agent's tool calls and events to the Workbench UI.
+ * Connects the Event Bridge to the layout store for real-time UI updates.
  */
 
 import { useEffect, useRef } from "react";
-import { useEventStore } from "#/stores/use-event-store";
+import { eventBridge, type OptimusEvent, type FileEventPayload, type TerminalEventPayload } from "#/services/optimus/event-bridge";
 import { useOptimusLayoutStore } from "#/stores/optimus/layout-store";
 
 /**
  * Hook for connecting workbench events to UI
  */
 export function useWorkbenchEvents() {
-  const events = useEventStore((state) => state.events);
   const {
     showPanel,
     openTab,
-    openDiff,
     setViewMode,
   } = useOptimusLayoutStore();
   
   const processedRef = useRef<Set<string>>(new Set());
   
   useEffect(() => {
-    const recentEvents = events.slice(-30);
-    
-    for (const event of recentEvents) {
-      const eventStr = JSON.stringify(event).slice(0, 100);
-      if (processedRef.current.has(eventStr)) continue;
+    // Listen to all events
+    const unsubscribeAll = eventBridge.onAny((event: OptimusEvent) => {
+      const eventKey = `${event.type}-${event.timestamp}`;
+      if (processedRef.current.has(eventKey)) return;
+      processedRef.current.add(eventKey);
       
-      const kind = (event as unknown as Record<string, unknown>).kind as string | undefined;
-      if (!kind) continue;
-      
-      processedRef.current.add(eventStr);
       if (processedRef.current.size > 200) {
         const arr = Array.from(processedRef.current);
         processedRef.current = new Set(arr.slice(-150));
       }
       
       // File events
-      if (kind.includes("File") || kind.includes("file_created") || kind.includes("file_modified")) {
-        showPanel("explorer");
-        showPanel("editor");
+      if (event.type.startsWith('file:')) {
+        showPanel('explorer');
+        showPanel('editor');
         
-        const path = (event as unknown as Record<string, unknown>).path as string | undefined;
-        if (path) {
-          const fileName = path.split("/").pop() || path;
-          const ext = fileName.split(".").pop()?.toLowerCase() || "";
+        const payload = event.payload as FileEventPayload;
+        if (payload?.path) {
+          const path = payload.path;
+          const fileName = path.split('/').pop() || path;
+          const ext = fileName.split('.').pop()?.toLowerCase() || '';
           const langMap: Record<string, string> = {
-            tsx: "typescript", ts: "typescript",
-            jsx: "javascript", js: "javascript",
-            py: "python", md: "markdown", json: "json",
-            css: "css", html: "html", txt: "plaintext",
+            tsx: 'typescript', ts: 'typescript',
+            jsx: 'javascript', js: 'javascript',
+            py: 'python', md: 'markdown', json: 'json',
+            css: 'css', html: 'html', txt: 'plaintext',
           };
           openTab({
-            id: `tab-${path.replace(/[^a-zA-Z0-9]/g, "-")}`,
+            id: `tab-${path.replace(/[^a-zA-Z0-9]/g, '-')}`,
             path,
             name: fileName,
-            language: langMap[ext] || "plaintext",
+            language: langMap[ext] || 'plaintext',
             isDirty: false,
           });
         }
         
-        setViewMode("split");
+        setViewMode('split');
       }
       
       // Terminal events
-      if (kind.includes("Terminal") || kind.includes("Command") || kind.includes("bash")) {
-        showPanel("terminal");
-        setViewMode("split");
+      if (event.type.startsWith('terminal:')) {
+        showPanel('terminal');
+        setViewMode('split');
       }
       
       // Git events
-      if (kind.includes("Git") || kind.includes("git_")) {
-        showPanel("scm");
-        setViewMode("split");
+      if (event.type.startsWith('git:')) {
+        showPanel('scm');
+        setViewMode('split');
       }
-    }
-  }, [events, showPanel, openTab, openDiff, setViewMode]);
+    });
+    
+    return unsubscribeAll;
+  }, [showPanel, openTab, setViewMode]);
+  
+  return eventBridge;
 }
 
 export function usePanelContext() {
-  const { viewMode, chatPanelHeight, setChatPanelHeight } = useOptimusLayoutStore();
+  const viewMode = useOptimusLayoutStore((state) => state.viewMode);
+  const chatPanelHeight = useOptimusLayoutStore((state) => state.chatPanelHeight);
   
   const visiblePanels = useOptimusLayoutStore((state) => 
     Object.entries(state.panels)
@@ -93,26 +93,23 @@ export function usePanelContext() {
 }
 
 export function useFileOperations() {
-  const events = useEventStore((state) => state.events);
-  const last = events.filter((e) => {
-    const k = (e as unknown as Record<string, unknown>).kind as string | undefined;
-    return k?.includes("File");
-  }).pop();
+  const history = eventBridge.getHistory().filter(e => 
+    e.type.startsWith('file:')
+  );
+  const last = history[history.length - 1] as OptimusEvent<FileEventPayload> | undefined;
   
   if (!last) return null;
-  const extLast = last as unknown as Record<string, unknown>;
   return {
-    kind: extLast.kind,
-    path: extLast.path as string,
+    kind: last.type,
+    path: last.payload.path,
   };
 }
 
 export function useTerminalOutput() {
-  const events = useEventStore((state) => state.events);
-  const last = events.filter((e) => {
-    const k = (e as unknown as Record<string, unknown>).kind as string | undefined;
-    return k?.includes("Terminal") || k?.includes("Command");
-  }).pop();
+  const history = eventBridge.getHistory().filter(e => 
+    e.type.startsWith('terminal:')
+  );
+  const last = history[history.length - 1] as OptimusEvent<TerminalEventPayload> | undefined;
   
   return { lastEvent: last };
 }
@@ -120,29 +117,34 @@ export function useTerminalOutput() {
 export interface AgentProgressStep {
   id: string;
   name: string;
-  status: "pending" | "active" | "complete" | "error";
+  status: 'pending' | 'active' | 'complete' | 'error';
 }
 
 export function useAgentProgress() {
-  const events = useEventStore((state) => state.events);
+  const agentEvents = eventBridge.getHistory().filter(e => 
+    e.type.startsWith('agent:')
+  );
+  
   const stepsRef = useRef<AgentProgressStep[]>([]);
   
   useEffect(() => {
-    const recent = events.slice(-20);
-    for (const event of recent) {
-      const tool = (event as unknown as Record<string, unknown>).tool as string | undefined;
-      if (tool && !stepsRef.current.find((s) => s.name === tool)) {
+    for (const event of agentEvents.slice(-20)) {
+      const payload = event.payload as { toolName?: string; thought?: string };
+      const name = payload.toolName || payload.thought?.substring(0, 30) || event.type;
+      
+      if (!stepsRef.current.find((s) => s.name === name)) {
         stepsRef.current.push({
-          id: `step-${Date.now()}`,
-          name: tool.replace(/_/g, " "),
-          status: "complete",
+          id: `step-${event.id}`,
+          name,
+          status: event.type === 'agent:error' ? 'error' : 'complete',
         });
       }
-      if (stepsRef.current.length > 10) {
-        stepsRef.current = stepsRef.current.slice(-10);
-      }
     }
-  }, [events]);
+    
+    if (stepsRef.current.length > 10) {
+      stepsRef.current = stepsRef.current.slice(-10);
+    }
+  }, [agentEvents]);
   
   return stepsRef.current;
 }

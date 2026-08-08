@@ -1,18 +1,19 @@
 /**
  * OPTIMUS Editor Area
- * 
- * Monaco editor with tabs, diff view, and multi-editor support.
+ * Monaco editor with real file loading.
  */
 
-import { useCallback } from "react";
-import Editor from "@monaco-editor/react";
+import { useCallback, useState, useEffect } from "react";
+import Editor, { OnMount } from "@monaco-editor/react";
+import type { editor } from "monaco-editor";
 import { useOptimusLayoutStore } from "../../../../stores/optimus/layout-store";
+import { filesystemService } from "../../../../services/optimus/filesystem";
+import { emitFileOpened } from "../../../../services/optimus/event-bridge";
 import { cn } from "../../../../utils/utils";
 
 export function OptimusEditor() {
-  const { openTabs, activeTabId, setActiveTab, closeTab, openDiffs, activeDiffId, splitEditor } = useOptimusLayoutStore();
-  
-  // If no tabs are open, show empty state
+  const { openTabs, activeTabId, setActiveTab, closeTab, openDiffs, activeDiffId } = useOptimusLayoutStore();
+
   if (openTabs.length === 0 && openDiffs.length === 0) {
     return (
       <div className="optimus-editor-empty">
@@ -22,15 +23,14 @@ export function OptimusEditor() {
             <path d="M14 2v6h6" />
           </svg>
           <h3>No file open</h3>
-          <p>Open a file from the Explorer or create a new one</p>
+          <p>Open a file from the Explorer</p>
         </div>
       </div>
     );
   }
-  
+
   return (
-    <div className={cn("optimus-editor-area", splitEditor && "split")}>
-      {/* Editor Tabs */}
+    <div className="optimus-editor-area">
       {openTabs.length > 0 && (
         <div className="optimus-editor-tabs">
           {openTabs.map((tab) => (
@@ -41,146 +41,89 @@ export function OptimusEditor() {
             >
               <span className="optimus-editor-tab-name">{tab.name}</span>
               {tab.isDirty && <span className="optimus-editor-tab-dirty">●</span>}
-              <button
-                className="optimus-editor-tab-close"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  closeTab(tab.id);
-                }}
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M18 6 6 18M6 6l12 12" />
-                </svg>
+              <button className="optimus-editor-tab-close" onClick={(e) => { e.stopPropagation(); closeTab(tab.id); }}>
+                ×
               </button>
             </div>
           ))}
         </div>
       )}
-      
-      {/* Editor Content */}
       <div className="optimus-editor-content">
-        {/* Active Tab Editor */}
-        {openTabs.length > 0 && (
-          <div className="optimus-editor-instance">
-            <EditorTabContent tabId={activeTabId} />
-          </div>
-        )}
-        
-        {/* Split Editor */}
-        {splitEditor && openTabs.length > 1 && (
-          <div className="optimus-editor-instance optimus-editor-split">
-            <EditorTabContent tabId={openTabs.find((t) => !t.isActive)?.id} />
-          </div>
-        )}
-        
-        {/* Diff Views */}
+        {openTabs.length > 0 && <EditorTabContent tabId={activeTabId} />}
         {openDiffs.map((diff) => (
-          <DiffViewContent key={diff.id} diff={diff} isActive={diff.id === activeDiffId} />
+          <DiffViewContent key={diff.id} diff={diff} />
         ))}
       </div>
     </div>
   );
 }
 
-// Editor tab content component
-interface EditorTabContentProps {
-  tabId: string | null | undefined;
-}
+function EditorTabContent({ tabId }: { tabId: string | null | undefined }) {
+  const tab = useOptimusLayoutStore((state) => state.openTabs.find((t) => t.id === tabId));
+  const { markTabDirty } = useOptimusLayoutStore();
+  const [content, setContent] = useState<string>("");
+  const [loading, setLoading] = useState(true);
 
-function EditorTabContent({ tabId }: EditorTabContentProps) {
-  const tab = useOptimusLayoutStore((state) =>
-    state.openTabs.find((t) => t.id === tabId)
-  );
-  
-  const { updateTab } = useOptimusLayoutStore();
-  
-  if (!tab) return null;
-  
-  // Placeholder content - will be connected to actual file service
-  const placeholderContent = `// ${tab.path}\n// File content will be loaded from the sandbox\n\nfunction example() {\n  console.log("Hello OPTIMUS!");\n}`;
-  
+  useEffect(() => {
+    if (!tab?.path) return;
+    setLoading(true);
+    filesystemService.readFile(tab.path)
+      .then((result) => {
+        setContent(result.content);
+        emitFileOpened(tab.path);
+      })
+      .catch(() => setContent("// Error loading file"))
+      .finally(() => setLoading(false));
+  }, [tab?.path]);
+
   const handleChange = useCallback((value: string | undefined) => {
-    if (value !== undefined) {
-      updateTab(tab.id, { isDirty: true });
+    if (value !== undefined && tab) {
+      setContent(value);
+      markTabDirty(tab.id, true);
     }
-  }, [tab.id, updateTab]);
-  
+  }, [tab?.id, markTabDirty]);
+
+  const handleMount: OnMount = useCallback((ed) => {
+    ed.addCommand(2048 | 49, async () => {
+      if (!tab) return;
+      await filesystemService.writeFile(tab.path, content);
+      markTabDirty(tab.id, false);
+    });
+  }, [tab?.path, tab?.id, content, markTabDirty]);
+
+  if (!tab) return null;
+  if (loading) return <div className="optimus-editor-loading">Loading...</div>;
+
   return (
     <Editor
       height="100%"
       language={tab.language}
-      value={placeholderContent}
-      theme="vs-dark"
+      value={content}
       onChange={handleChange}
+      onMount={handleMount}
+      theme="vs-dark"
       options={{
         minimap: { enabled: true },
         lineNumbers: "on",
-        glyphMargin: true,
-        folding: true,
-        lineDecorationsWidth: 10,
-        scrollBeyondLastLine: false,
         fontSize: 13,
-        fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-        cursorBlinking: "smooth",
-        smoothScrolling: true,
-        padding: { top: 10 },
+        fontFamily: "'Fira Code', monospace",
+        automaticLayout: true,
       }}
     />
   );
 }
 
-// Diff view content component
-interface DiffViewContentProps {
-  diff: {
-    id: string;
-    originalPath: string;
-    originalContent?: string;
-    modifiedPath: string;
-    modifiedContent?: string;
-    title?: string;
-  };
-  isActive: boolean;
-}
-
-function DiffViewContent({ diff, isActive }: DiffViewContentProps) {
-  if (!isActive) return null;
-  
+function DiffViewContent({ diff }: { diff: { id: string; originalPath: string; modifiedPath?: string; originalContent?: string } }) {
   return (
     <div className="optimus-diff-view">
-      <div className="optimus-diff-header">
-        <span>{diff.title || `Diff: ${diff.originalPath} → ${diff.modifiedPath}`}</span>
-        <button
-          className="optimus-diff-close"
-          onClick={() => useOptimusLayoutStore.getState().closeDiff(diff.id)}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M18 6 6 18M6 6l12 12" />
-          </svg>
-        </button>
-      </div>
-      <div className="optimus-diff-content">
-        <Editor
-          height="100%"
-          language="diff"
-          value={generateDiffContent(diff)}
-          theme="vs-dark"
-          options={{
-            readOnly: true,
-            minimap: { enabled: false },
-            lineNumbers: "on",
-            fontSize: 13,
-            fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-          }}
-        />
-      </div>
+      <div className="optimus-diff-header">{diff.originalPath}</div>
+      <Editor
+        height="100%"
+        language="diff"
+        value={diff.originalContent || "// No diff"}
+        theme="vs-dark"
+        options={{ readOnly: true, minimap: { enabled: false } }}
+      />
     </div>
   );
 }
-
-// Helper to generate diff content
-function generateDiffContent(diff: DiffViewContentProps["diff"]): string {
-  const original = diff.originalContent || `// Original: ${diff.originalPath}\n// No changes`;
-  const modified = diff.modifiedContent || `// Modified: ${diff.modifiedPath}\n// No changes`;
-  return `--- ${diff.originalPath}\n+++ ${diff.modifiedPath}\n${original}\n\n${modified}`;
-}
-
